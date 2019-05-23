@@ -7,6 +7,10 @@
 // トークンの型を表す値
 enum {
   TK_NUM = 256, // 整数トークン
+  TK_EQ,        // ==
+  TK_NE,        // !=
+  TK_LE,        // <=
+  TK_GE,        // >=
   TK_EOF,       // 入力の終わりを表すトークン
 };
 
@@ -20,6 +24,9 @@ typedef struct {
 // ノードの型を表す値
 enum {
   ND_NUM = 256,     // 整数のノードの型
+  ND_EQ,            // ==
+  ND_NE,            // !=
+  ND_LE,            // <=
 };
 
 // ノードの型
@@ -86,11 +93,48 @@ Node *new_node_num(int val) {
 }
 
 Node *expr();
+Node *equality();
+Node *relational();
+Node *add();
 Node *mul();
 Node *unary();
 Node *term();
 
 Node *expr() {
+  return equality();
+}
+
+Node *equality() {
+  Node *node = relational();
+
+  for (;;) {
+    if (consume(TK_EQ))
+      node = new_node(ND_EQ, node, relational());
+    else if (consume(TK_NE))
+      node = new_node(ND_NE, node, relational());
+    else
+      return node;
+  }
+}
+
+Node *relational() {
+  Node *node = add();
+
+  for (;;) {
+    if (consume(TK_LE))
+      node = new_node(ND_LE, node, add());
+    else if (consume(TK_GE))
+      node = new_node(ND_LE, add(), node);
+    else if (consume('<'))
+      node = new_node('<', node, add());
+    else if (consume('>'))
+      node = new_node('<', add(), node);
+    else
+      return node;
+  }
+}
+
+Node *add() {
   Node *node = mul();
 
   for (;;) {
@@ -169,6 +213,26 @@ void gen(Node *node) {
       printf("  cqo\n");
       printf("  idiv rdi\n");
       break;
+    case '<':
+      printf("  cmp rax, rdi\n");
+      printf("  setl al\n");
+      printf("  movzb rax, al\n");
+      break;
+    case ND_EQ:
+      printf("  cmp rax, rdi\n");
+      printf("  sete al\n");
+      printf("  movzb rax, al\n");
+      break;
+    case ND_NE:
+      printf("  cmp rax, rdi\n");
+      printf("  setne al\n");
+      printf("  movzb rax, al\n");
+      break;
+    case ND_LE:
+      printf("  cmp rax, rdi\n");
+      printf("  setle al\n");
+      printf("  movzb rax, al\n");
+      break;
   }
 
   printf("  push rax\n");
@@ -187,7 +251,40 @@ void tokenize() {
       continue;
     }
 
-    if (*p == '+' || *p == '-' || *p == '*' || *p == '/' || *p == '(' || *p == ')') {
+    if (strncmp(p, "==", 2) == 0) {
+      tokens[i].ty = TK_EQ;
+      tokens[i].input = p;
+      i++;
+      p += 2;
+      continue;
+    }
+
+    if (strncmp(p, "!=", 2) == 0) {
+      tokens[i].ty = TK_NE;
+      tokens[i].input = p;
+      i++;
+      p += 2;
+      continue;
+    }
+
+    if (strncmp(p, "<=", 2) == 0) {
+      tokens[i].ty = TK_LE;
+      tokens[i].input = p;
+      i++;
+      p += 2;
+      continue;
+    }
+
+    if (strncmp(p, ">=", 2) == 0) {
+      tokens[i].ty = TK_GE;
+      tokens[i].input = p;
+      i++;
+      p += 2;
+      continue;
+    }
+
+    if (*p == '+' || *p == '-' || *p == '*' || *p == '/'
+        || *p == '(' || *p == ')' || *p == '<' || *p == '>') {
       tokens[i].ty = *p;
       tokens[i].input = p;
       i++;
@@ -210,6 +307,20 @@ void tokenize() {
   tokens[i].input = p;
 }
 
+void print_tokens() {
+  for (int i = 0; tokens[i].ty != TK_EOF; i++) {
+   printf("ty: %d, val: %d\n", tokens[i].ty, tokens[i].val);
+  }
+}
+
+void print_tree(Node *node) {
+  printf("ty: %d, val: %d\n", node->ty, node->val);
+  if (node->ty == ND_NUM)
+    return;
+  print_tree(node->lhs);
+  print_tree(node->rhs);
+}
+
 int main(int argc, char **argv) {
   if (argc != 2) {
     error("引数の個数が正しくありません");
@@ -219,7 +330,9 @@ int main(int argc, char **argv) {
   // トークナイズしてパースする
   user_input = argv[1];
   tokenize();
+  // print_tokens();
   Node *node = expr();
+  // print_tree(node);
 
   // アセンブリの前半部分を出力
   printf(".intel_syntax noprefix\n");
